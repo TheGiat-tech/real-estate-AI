@@ -42,12 +42,35 @@ export async function GET(req: NextRequest) {
       /* ignore non-JSON */
     }
 
+    const detailMessage = (() => {
+      if (typeof detail === 'string') return detail;
+      if (detail && typeof detail === 'object') {
+        for (const key of ['message', 'detail', 'error', 'errors']) {
+          const value = (detail as Record<string, unknown>)[key];
+          if (typeof value === 'string') return value;
+        }
+        try {
+          return JSON.stringify(detail);
+        } catch {
+          /* ignore */
+        }
+      }
+      return undefined;
+    })();
+
     // Zillow API returns 404 for unknown properties – surface a friendly error
     if (r.status === 404) {
       return NextResponse.json({ error: 'not_found', detail: 'No Zillow data found for that address.' }, { status: 404 });
     }
 
-    return NextResponse.json({ error: 'rapidapi_failed', status: r.status, detail }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: 'rapidapi_failed',
+        status: r.status,
+        detail: detailMessage ?? 'RapidAPI Zillow request failed.'
+      },
+      { status: 502 }
+    );
   }
 
   const raw: any = await r.json();

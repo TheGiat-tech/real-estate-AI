@@ -29,14 +29,33 @@ export default function Form() {
       return;
     }
     if(!res.ok){
-      let msg = `status ${res.status}`;
+      let msg: unknown = `status ${res.status}`;
       try {
         const data = await res.json();
-        msg = data?.detail || data?.error || msg;
+        const detail = data?.detail ?? data?.error ?? data?.message;
+        if (typeof detail === 'string') {
+          msg = detail;
+        } else if (detail && typeof detail === 'object') {
+          const nested =
+            (detail as Record<string, unknown>).message ??
+            (detail as Record<string, unknown>).detail ??
+            (detail as Record<string, unknown>).error;
+          if (typeof nested === 'string') {
+            msg = nested;
+          } else {
+            try {
+              msg = JSON.stringify(detail);
+            } catch {
+              msg = detail;
+            }
+          }
+        } else if (typeof data?.error === 'string') {
+          msg = data.error;
+        }
       } catch {
         /* ignore */
       }
-      alert(`Zillow lookup failed: ${msg}`);
+      alert(`Zillow lookup failed: ${typeof msg === 'string' ? msg : String(msg)}`);
       return;
     }
     const j = await res.json();
