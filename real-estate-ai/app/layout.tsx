@@ -10,7 +10,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <img src="/logo.svg" alt="logo" className="h-8 w-8" />
             <div>
               <div className="text-xl font-bold">Property Rehab & ARV Estimator</div>
-              <div className="muted text-sm">BRRRR workflow • Roboflow + Zillow + Supabase</div>
             </div>
           </div>
         </header>

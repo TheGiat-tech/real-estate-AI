@@ -92,19 +92,44 @@ export default function Form() {
       </div>
 
       <div className="card p-5">
-        <div className="hdr mb-3">Save Report</div>
-        <button className="btn" onClick={async ()=>{
-          const res = await fetch('/api/save-report', {
-            method:'POST',
-            headers: { 'content-type':'application/json' },
-            body: JSON.stringify({
-              address, mode, sqft, price,
-              zestimate: zdata.zestimate, rent: zdata.rent, zip: zdata.zip,
-              detections, summary, rehab, arv, metric
-            })
-          });
-          alert(res.ok ? 'Saved to Supabase' : 'Save failed');
-        }}>Save to Supabase</button>
+        <div className="hdr mb-3">Download Report</div>
+        <button
+          className="btn"
+          onClick={() => {
+            const report = {
+              generatedAt: new Date().toISOString(),
+              address,
+              mode,
+              sqft,
+              price,
+              zestimate: zdata.zestimate,
+              rent: zdata.rent,
+              zip: zdata.zip,
+              detections,
+              summary,
+              rehab,
+              arv,
+              metric,
+            };
+            const contents = JSON.stringify(report, null, 2);
+            const blob = new Blob([contents], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            const fallbackName = 'property-report';
+            const normalizedAddress = address
+              ? address
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/gi, '-')
+                  .replace(/^-+|-+$/g, '')
+              : fallbackName;
+            anchor.href = url;
+            anchor.download = `${normalizedAddress || fallbackName}.json`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+          }}
+        >
+          Download Report
+        </button>
       </div>
     </div>
   );
