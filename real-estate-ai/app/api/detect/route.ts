@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  if (!process.env.ROBOFLOW_API_KEY) {
+    return NextResponse.json({ error: 'ROBOFLOW_API_KEY is not configured' }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
   const address = searchParams.get('address') ?? '';
   const mode = searchParams.get('mode') ?? 'rental';
@@ -14,7 +18,7 @@ export async function POST(req: NextRequest) {
   if (!file) return NextResponse.json({ error: 'image missing' }, { status: 400 });
 
   const u = new URL('https://detect.roboflow.com/property-rehab-arv-estimator');
-  u.searchParams.set('api_key', process.env.ROBOFLOW_API_KEY!);
+  u.searchParams.set('api_key', process.env.ROBOFLOW_API_KEY);
   if (address) u.searchParams.set('address', address);
   if (mode) u.searchParams.set('mode', mode);
   if (sqft) u.searchParams.set('sqft', String(sqft));
@@ -23,7 +27,15 @@ export async function POST(req: NextRequest) {
   const rfForm = new FormData();
   rfForm.append('image', file);
 
-  const r = await fetch(u.toString(), { method: 'POST', body: rfForm, cache: 'no-store' });
-  const j = await r.json().catch(() => ({}));
-  return NextResponse.json(j);
+  try {
+    const r = await fetch(u.toString(), { method: 'POST', body: rfForm, cache: 'no-store' });
+    if (!r.ok) {
+      const text = await r.text();
+      return NextResponse.json({ error: 'roboflow_failed', status: r.status, detail: text }, { status: 502 });
+    }
+    const j = await r.json().catch(() => ({}));
+    return NextResponse.json(j);
+  } catch (error) {
+    return NextResponse.json({ error: 'roboflow_request_failed', detail: (error as Error).message }, { status: 502 });
+  }
 }
