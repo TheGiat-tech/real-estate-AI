@@ -7,7 +7,7 @@ html, body { height: 100%; }
 body { @apply bg-bg text-ink; background: linear-gradient(180deg, #0b1020, #0e1730); }
 
 .container { @apply max-w-5xl mx-auto px-4; }
-.card { @apply bg-card/90 border border-white/10 rounded-2xl shadow-xl; backdrop-blur; }
+.card { @apply bg-card/90 border border-white/10 rounded-2xl shadow-xl backdrop-blur; }
 .hdr  { @apply text-2xl font-bold; }
 .muted{ @apply text-mute; }
 
