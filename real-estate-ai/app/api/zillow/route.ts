@@ -11,25 +11,48 @@ export async function GET(req: NextRequest) {
   const host = 'real-time-zillow-data.p.rapidapi.com';
   const url = `https://${host}/property-details-address?address=${encodeURIComponent(address)}`;
 
-  const r = await fetch(url, {
-    headers: {
-      'X-RapidAPI-Key': process.env.RAPIDAPI_KEY,
-      'X-RapidAPI-Host': host
-    },
-    cache: 'no-store'
-  });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: {
+        'X-RapidAPI-Key': process.env.RAPIDAPI_KEY,
+        'X-RapidAPI-Host': host
+      },
+      cache: 'no-store'
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'rapidapi_fetch_failed', detail: (error as Error)?.message ?? 'request failed' },
+      { status: 502 }
+    );
+  }
+
   if (!r.ok) {
-    const detail = await r.text();
+    let detail: any = await r.text();
+    try {
+      detail = JSON.parse(detail);
+    } catch {
+      /* ignore non-JSON */
+    }
+
+    // Zillow API returns 404 for unknown properties – surface a friendly error
+    if (r.status === 404) {
+      return NextResponse.json({ error: 'not_found', detail: 'No Zillow data found for that address.' }, { status: 404 });
+    }
+
     return NextResponse.json({ error: 'rapidapi_failed', status: r.status, detail }, { status: 502 });
   }
-  const z: any = await r.json();
+
+  const raw: any = await r.json();
+  const z = raw?.data ?? raw?.result ?? raw;
+  const core = z?.property ?? z?.home ?? z;
   const out = {
-    zestimate: z.zestimate ?? z.estimate ?? undefined,
-    rent: z.rentZestimate ?? z.rent_estimate ?? undefined,
-    sqft: z.livingArea ?? z.sqft ?? undefined,
-    beds: z.bedrooms ?? undefined,
-    baths: z.bathrooms ?? undefined,
-    zip: z.zipcode ?? z.zip ?? undefined
+    zestimate: core?.zestimate ?? core?.estimate ?? undefined,
+    rent: core?.rentZestimate ?? core?.rent_estimate ?? undefined,
+    sqft: core?.livingArea ?? core?.sqft ?? undefined,
+    beds: core?.bedrooms ?? undefined,
+    baths: core?.bathrooms ?? undefined,
+    zip: core?.zipcode ?? core?.zip ?? undefined
   };
   return NextResponse.json(out);
 }

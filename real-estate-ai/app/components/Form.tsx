@@ -20,9 +20,30 @@ export default function Form() {
 
   async function autofill(){
     if(!address) return alert('Enter address first');
-    const res = await fetch(`/api/zillow?address=${encodeURIComponent(address)}`);
-    if(!res.ok){ alert('Zillow lookup failed'); return; }
+    let res: Response;
+    try {
+      res = await fetch(`/api/zillow?address=${encodeURIComponent(address.trim())}`);
+    } catch (error) {
+      console.error('zillow lookup error', error);
+      alert('Zillow lookup failed: network error');
+      return;
+    }
+    if(!res.ok){
+      let msg = `status ${res.status}`;
+      try {
+        const data = await res.json();
+        msg = data?.detail || data?.error || msg;
+      } catch {
+        /* ignore */
+      }
+      alert(`Zillow lookup failed: ${msg}`);
+      return;
+    }
     const j = await res.json();
+    if(!j || Object.keys(j).length === 0){
+      alert('No Zillow data returned for that address.');
+      return;
+    }
     setZdata(j);
     if(!sqft && j.sqft) setSqft(j.sqft);
     if(!price && j.zestimate) setPrice(Math.round(j.zestimate));
