@@ -4,8 +4,15 @@ export async function GET(req: NextRequest) {
   const address = req.nextUrl.searchParams.get('address') || '';
   if (!address) return NextResponse.json({ error: 'address missing' }, { status: 400 });
 
-  if (!process.env.RAPIDAPI_KEY) {
-    return NextResponse.json({ error: 'RAPIDAPI_KEY is not configured' }, { status: 500 });
+  const rapidApiKey = process.env.RAPIDAPI_KEY ?? process.env.NEXT_PUBLIC_RAPIDAPI_KEY;
+  if (!rapidApiKey) {
+    return NextResponse.json(
+      {
+        error: 'rapidapi_key_missing',
+        detail: 'RAPIDAPI_KEY environment variable is not configured.'
+      },
+      { status: 500 }
+    );
   }
 
   const host = 'real-time-zillow-data.p.rapidapi.com';
@@ -15,7 +22,7 @@ export async function GET(req: NextRequest) {
   try {
     r = await fetch(url, {
       headers: {
-        'X-RapidAPI-Key': process.env.RAPIDAPI_KEY,
+        'X-RapidAPI-Key': rapidApiKey,
         'X-RapidAPI-Host': host
       },
       cache: 'no-store'
