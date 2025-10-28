@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import KPICards from './KPICards';
 import DamageTable from './DamageTable';
 import { estimateRehab, computeARV, capRate } from '@/lib/costs';
@@ -13,6 +13,8 @@ export default function Form() {
   const [price,setPrice] = useState<number|undefined>();
   const [file,setFile] = useState<File|null>(null);
   const [busy,setBusy] = useState(false);
+  const fileInputId = useId();
+  const fileInputRef = useRef<HTMLInputElement|null>(null);
 
   const [zdata,setZdata] = useState<ZillowOut>({});
   const [detections,setDetections] = useState<any[]>([]);
@@ -70,7 +72,34 @@ export default function Form() {
           </div>
           <div><div className="muted text-sm mb-1">Square Footage (sqft)</div><input className="input" value={sqft ?? ''} onChange={e=>setSqft(Number(e.target.value)||undefined)} placeholder="auto from Zillow" /></div>
           <div><div className="muted text-sm mb-1">Purchase Price (USD)</div><input className="input" value={price ?? ''} onChange={e=>setPrice(Number(e.target.value)||undefined)} placeholder="optional (can prefill)" /></div>
-          <div className="sm:col-span-2"><div className="muted text-sm mb-1">Upload Property Image</div><input className="input" type="file" accept="image/*" onChange={e=>setFile(e.target.files?.[0]??null)} /></div>
+          <div className="sm:col-span-2">
+            <div className="muted text-sm mb-1">Upload Property Image</div>
+            <input
+              ref={fileInputRef}
+              id={fileInputId}
+              className="sr-only"
+              type="file"
+              accept="image/*"
+              onChange={e=>setFile(e.target.files?.[0]??null)}
+            />
+            <label
+              htmlFor={fileInputId}
+              role="button"
+              tabIndex={0}
+              onKeyDown={event => {
+                if(event.key === 'Enter' || event.key === ' '){
+                  event.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              className="input cursor-pointer flex items-center gap-3 hover:border-white/20 transition"
+            >
+              <span className="btn">Select Image</span>
+              <span className="text-sm text-white/70 truncate" title={file?.name ?? 'No file selected'}>
+                {file?.name ?? 'No file selected'}
+              </span>
+            </label>
+          </div>
         </div>
         <div className="flex gap-3 mt-4">
           <button className="btn" onClick={run} disabled={busy}>{busy?'Analyzing…':'Analyze & Generate Report'}</button>
