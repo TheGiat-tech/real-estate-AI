@@ -14,8 +14,11 @@ export async function POST(req: NextRequest) {
   const purchase_price = searchParams.get('purchase_price') ?? '';
 
   const form = await req.formData();
-  const file = form.get('image') as File | null;
-  if (!file) return NextResponse.json({ error: 'image missing' }, { status: 400 });
+  const uploaded = form.getAll('image');
+  const files = uploaded.filter((item): item is File => item instanceof File);
+  if (files.length === 0) {
+    return NextResponse.json({ error: 'image missing' }, { status: 400 });
+  }
 
   const u = new URL('https://detect.roboflow.com/property-rehab-arv-estimator');
   u.searchParams.set('api_key', process.env.ROBOFLOW_API_KEY);
@@ -24,18 +27,66 @@ export async function POST(req: NextRequest) {
   if (sqft) u.searchParams.set('sqft', String(sqft));
   if (purchase_price) u.searchParams.set('purchase_price', String(purchase_price));
 
-  const rfForm = new FormData();
-  rfForm.append('image', file);
+  const perImage: {
+    index: number;
+    filename: string;
+    summary: string | null;
+    detections: any[];
+  }[] = [];
 
-  try {
-    const r = await fetch(u.toString(), { method: 'POST', body: rfForm, cache: 'no-store' });
-    if (!r.ok) {
-      const text = await r.text();
-      return NextResponse.json({ error: 'roboflow_failed', status: r.status, detail: text }, { status: 502 });
+  for (const [index, file] of files.entries()) {
+    const rfForm = new FormData();
+    rfForm.append('image', file);
+
+    let response: Response;
+    try {
+      response = await fetch(u.toString(), { method: 'POST', body: rfForm, cache: 'no-store' });
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'roboflow_request_failed', detail: (error as Error).message, imageIndex: index, filename: file.name },
+        { status: 502 },
+      );
     }
-    const j = await r.json().catch(() => ({}));
-    return NextResponse.json(j);
-  } catch (error) {
-    return NextResponse.json({ error: 'roboflow_request_failed', detail: (error as Error).message }, { status: 502 });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return NextResponse.json(
+        { error: 'roboflow_failed', status: response.status, detail: text, imageIndex: index, filename: file.name },
+        { status: 502 },
+      );
+    }
+
+    const json = await response.json().catch(() => ({}));
+    const rawDetections = (json.detections ?? json.predictions ?? []) as any[];
+    const normalizedDetections = rawDetections.map(det => ({
+      ...det,
+      imageIndex: index,
+      imageFilename: file.name,
+    }));
+
+    perImage.push({
+      index,
+      filename: file.name,
+      summary: json.summary ?? null,
+      detections: normalizedDetections,
+    });
   }
+
+  const allDetections = perImage.flatMap(entry => entry.detections);
+  const combinedSummaries = perImage
+    .map(entry => {
+      if (!entry.summary) return null;
+      const header = perImage.length > 1 ? `Image ${entry.index + 1} (${entry.filename})` : entry.filename;
+      return header ? `${header}:\n${entry.summary}` : entry.summary;
+    })
+    .filter((value): value is string => Boolean(value));
+  const summary = combinedSummaries.length > 0
+    ? combinedSummaries.join('\n\n')
+    : (perImage[0]?.summary ?? '—');
+
+  return NextResponse.json({
+    detections: allDetections,
+    summary,
+    perImage,
+  });
 }
