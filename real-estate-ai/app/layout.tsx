@@ -1,4 +1,5 @@
 import './globals.css';
+import Image from 'next/image';
 import { ReactNode } from 'react';
 export const metadata = { title: 'Property Rehab & ARV Estimator', description: 'AI damage detection + rehab + ARV' };
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -7,7 +8,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <header className="container py-6">
           <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="logo" className="h-8 w-8" />
+            <Image src="/logo.svg" alt="logo" width={32} height={32} className="h-8 w-8" priority />
             <div>
               <div className="text-xl font-bold">Property Rehab & ARV Estimator</div>
             </div>
