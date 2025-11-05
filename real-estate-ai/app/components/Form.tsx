@@ -1,10 +1,37 @@
 'use client';
-import { useId, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import KPICards from './KPICards';
 import DamageTable from './DamageTable';
 import { estimateRehab, computeARV, capRate } from '@/lib/costs';
 
 type ZillowOut = { zestimate?: number; rent?: number; sqft?: number; zip?: string; beds?: number; baths?: number };
+
+async function downloadPDF(reportData: any) {
+  const res = await fetch('/api/report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(reportData),
+  });
+  if (!res.ok) { alert('PDF generation error'); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `appraisal_${Date.now()}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function DownloadReportButton({ report }: { report: any }) {
+  return (
+    <button
+      onClick={() => downloadPDF(report)}
+      className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow"
+    >
+      Download PDF
+    </button>
+  );
+}
 
 export default function Form() {
   const [address,setAddress] = useState('');
@@ -50,163 +77,61 @@ export default function Form() {
     } finally { setBusy(false); }
   }
 
-  const rehab = (() => {
+  const rehabEstimate = useMemo(() => {
     if(!sqft) return undefined;
-    return estimateRehab(detections, sqft, zdata.zip).total;
-  })();
+    return estimateRehab(detections, sqft, zdata.zip);
+  }, [detections, sqft, zdata.zip]);
+  const rehab = rehabEstimate?.total;
   const arv = computeARV(zdata.zestimate, mode);
   const metric = mode==='rental'
     ? (capRate(zdata.rent, price) ? `${capRate(zdata.rent, price)}%` : undefined)
     : (price && arv ? (arv - price).toLocaleString('en-US', {style:'currency', currency:'USD', maximumFractionDigits:0}) : undefined);
+  const reportPayload = useMemo(() => {
+    const detectionsList = (detections || []).map((d: any) => ({
+      label: (d.label || d.class || 'Item').toString(),
+      confidence: typeof d.confidence === 'number' ? d.confidence : typeof d.score === 'number' ? d.score : undefined,
+      note: d.note || d.description || '',
+    }));
 
-  const downloadReport = async () => {
-    const { jsPDF } = await import('jspdf');
-    const doc = new jsPDF({ unit: 'pt' });
-    const margin = 48;
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const usableWidth = pageWidth - margin * 2;
-    let y = margin;
+    const lineItems = rehabEstimate?.lines?.map?.(({ item, cost }) => ({
+      category: item.replace(/_/g, ' ').replace(/\b\w/g, (char: string) => char.toUpperCase()),
+      subtotal: cost,
+    }));
 
-    const formatCurrency = (value?: number) =>
-      typeof value === 'number'
-        ? value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
-        : 'N/A';
-    const formatPercent = (value?: number) =>
-      typeof value === 'number'
-        ? `${Math.round(value * 100)}%`
-        : '—';
+    const safeSummary = summary && summary !== '—' ? summary : undefined;
 
-    const normalizedAddress = address
-      ? address
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/gi, '-')
-          .replace(/^-+|-+$/g, '')
-      : 'property-report';
-
-    const ensureSpace = (spaceNeeded: number) => {
-      if (y + spaceNeeded > pageHeight - margin) {
-        doc.addPage();
-        y = margin;
-      }
+    return {
+      company: {
+        name: 'Real Estate AI Contractors',
+        email: 'estimates@realestate.ai',
+        phone: '(555) 010-1000',
+        address: '123 Market Street, Suite 400, Springfield, USA',
+      },
+      client: {
+        name: 'Property Owner',
+      },
+      address: address || 'Unspecified property address',
+      mode,
+      sqft,
+      price,
+      zestimate: zdata.zestimate,
+      rent: zdata.rent,
+      zip: zdata.zip,
+      detections: detectionsList,
+      summary: safeSummary,
+      rehab,
+      arv,
+      metric,
+      lineItems,
+      disclaimer:
+        'Figures herein are planning-level estimates. Contractor bids, permits, and onsite inspections may adjust the final scope.',
+      signatures: {
+        contractorName: 'Estimator',
+        clientName: 'Owner',
+        date: new Date().toLocaleDateString(),
+      },
     };
-
-    const sectionHeader = (title: string) => {
-      ensureSpace(32);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.text(title, margin, y);
-      y += 22;
-    };
-
-    const addParagraph = (text: string) => {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      const lines = doc.splitTextToSize(text, usableWidth) as string[];
-      const height = lines.length * 16;
-      ensureSpace(height);
-      lines.forEach((line: string) => {
-        doc.text(line, margin, y);
-        y += 16;
-      });
-    };
-
-    const addKeyValue = (label: string, value: string) => {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      ensureSpace(18);
-      doc.text(`${label}:`, margin, y);
-      doc.text(value, pageWidth - margin, y, { align: 'right' });
-      y += 18;
-    };
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.text('Property Rehabilitation & Appraisal Report', margin, y);
-    y += 26;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
-    y += 24;
-
-    sectionHeader('Property Overview');
-    addKeyValue('Address', address || '—');
-    addKeyValue('Investment Strategy', mode === 'rental' ? 'Rental (Buy & Hold)' : 'Flip (Resale)');
-    if (sqft) addKeyValue('Square Footage', `${sqft.toLocaleString()} sqft`);
-    if (price) addKeyValue('Purchase Price', formatCurrency(price));
-    if (zdata.zestimate) addKeyValue('Zestimate®', formatCurrency(zdata.zestimate));
-    if (zdata.rent) addKeyValue('Estimated Rent', formatCurrency(zdata.rent));
-    if (zdata.zip) addKeyValue('ZIP Code', zdata.zip);
-    if (!sqft && !price && !zdata.zestimate && !zdata.rent && !zdata.zip) {
-      addParagraph('No property metrics were provided. Run an analysis or use Auto-fill from Zillow for richer insights.');
-    }
-
-    sectionHeader('Executive Summary');
-    addParagraph(summary && summary !== '—' ? summary : 'No AI summary available yet. Run the analysis to generate findings.');
-
-    sectionHeader('Contractor Estimate');
-    const rehabValue = formatCurrency(rehab);
-    addParagraph(`Recommended scope of work budgeted at ${rehabValue}. This figure is derived from detected condition issues and the reported square footage.`);
-    const detectionHighlight = detections?.length
-      ? detections
-          .slice(0, 5)
-          .map((d: any, idx: number) => {
-            const label = (d.label || d.class || 'Item').toString();
-            const confRaw = d.confidence ?? d.score;
-            const confidenceText = typeof confRaw === 'number' ? ` (confidence ${formatPercent(confRaw)})` : '';
-            return `${idx + 1}. ${label}${confidenceText}`;
-          })
-          .join('\n')
-      : 'No visible damages were detected in the uploaded imagery. Include additional photos for a more comprehensive scope.';
-    addParagraph(`Top visible scope items:\n${detectionHighlight}`);
-
-    sectionHeader('Appraiser Notes');
-    const arvValue = arv ? formatCurrency(arv) : 'N/A';
-    const metricLabel = mode === 'rental' ? 'Projected Cap Rate' : 'Equity Spread';
-    addKeyValue('After Repair Value (ARV)', arvValue);
-    addKeyValue(metricLabel, metric ?? '—');
-    const rentLine = zdata.rent ? `Stabilized monthly rent expected around ${formatCurrency(zdata.rent)}.` : '';
-    const priceLine = price && arv ? `Projected equity after repairs: ${(arv - price).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}.` : '';
-    addParagraph([
-      rentLine,
-      priceLine,
-      'Assumptions are based on publicly available valuation data and user-provided purchase economics. Field verification is recommended for final underwriting.'
-        .trim(),
-    ].filter(Boolean).join(' '));
-
-    sectionHeader('Damage & Repair Log');
-    if (detections?.length) {
-      detections.forEach((d: any, index: number) => {
-        ensureSpace(18);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.text(`${index + 1}. ${(d.label || d.class || 'Item').toString()}`, margin, y);
-        const confidence = d.confidence ?? d.score;
-        if (typeof confidence === 'number') {
-          doc.setFont('helvetica', 'normal');
-          doc.text(`Confidence: ${formatPercent(confidence)}`, pageWidth - margin, y, { align: 'right' });
-        }
-        y += 16;
-
-        if (d.description) {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(10);
-          const lines = doc.splitTextToSize(String(d.description), usableWidth) as string[];
-          const blockHeight = lines.length * 14;
-          ensureSpace(blockHeight);
-          lines.forEach((line: string) => {
-            doc.text(line, margin + 12, y);
-            y += 14;
-          });
-        }
-      });
-    } else {
-      addParagraph('No repair items have been catalogued yet. Upload additional imagery or run the analyzer to populate this log.');
-    }
-
-    doc.save(`${normalizedAddress || 'property-report'}.pdf`);
-  };
+  }, [detections, rehabEstimate, rehab, arv, metric, address, mode, sqft, price, zdata.zestimate, zdata.rent, zdata.zip, summary]);
 
   return (
     <div className="space-y-6">
@@ -271,12 +196,7 @@ export default function Form() {
 
       <div className="card p-5">
         <div className="hdr mb-3">Download Report</div>
-        <button
-          className="btn"
-          onClick={downloadReport}
-        >
-          Download Report
-        </button>
+        <DownloadReportButton report={reportPayload} />
       </div>
     </div>
   );
