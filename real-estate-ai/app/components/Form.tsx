@@ -2,7 +2,7 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import KPICards from './KPICards';
 import DamageTable from './DamageTable';
-import { estimateRehab, computeARV, capRate } from '@/lib/costs';
+import { estimateRehab, computeARV, capRate, type RehabCostBreakdown } from '@/lib/costs';
 
 type ZillowOut = { zestimate?: number; rent?: number; sqft?: number; zip?: string; beds?: number; baths?: number };
 
@@ -46,6 +46,8 @@ export default function Form() {
   const [zdata,setZdata] = useState<ZillowOut>({});
   const [detections,setDetections] = useState<any[]>([]);
   const [summary,setSummary] = useState<string>('—');
+  const [rehabData, setRehabData] = useState<RehabCostBreakdown | null>(null);
+  const [localFactor, setLocalFactor] = useState<number | undefined>();
 
   async function autofill(){
     if(!address) return alert('Enter address first');
@@ -60,42 +62,72 @@ export default function Form() {
   async function run(){
     if(!file) return alert('Upload an image');
     setBusy(true);
+    setRehabData(null);
+    setLocalFactor(undefined);
     try{
       const fd = new FormData();
       fd.append('image', file);
+      if (zdata.zip) fd.append('zip', zdata.zip);
       const u = new URL('/api/detect', location.origin);
       if(address) u.searchParams.set('address', address);
       if(mode) u.searchParams.set('mode', mode);
       if(sqft) u.searchParams.set('sqft', String(sqft));
       if(price) u.searchParams.set('purchase_price', String(price));
+      if (zdata.zip) u.searchParams.set('zip', zdata.zip);
       const res = await fetch(u.toString(), { method:'POST', body: fd });
+      if(!res.ok){
+        const err = await res.json().catch(() => null);
+        const msg = typeof err?.error === 'string' ? err.error : err?.detail ?? 'Analysis failed';
+        alert(msg);
+        setDetections([]);
+        setSummary('—');
+        return;
+      }
       const data = await res.json();
 
       const dets = (data.detections ?? data.predictions ?? []);
       setDetections(dets);
-      setSummary(data.summary ?? '—');
+      setSummary(data.summary ?? data.report ?? data.notes ?? '—');
+      if (typeof data.localFactor === 'number' && Number.isFinite(data.localFactor)) {
+        setLocalFactor(data.localFactor);
+      }
+      setRehabData(data.rehab ?? null);
+      if (!sqft && typeof data.sqft === 'number' && Number.isFinite(data.sqft) && data.sqft > 0) {
+        setSqft(Math.round(data.sqft));
+      }
+      if (!price && typeof data.price === 'number' && Number.isFinite(data.price) && data.price > 0) {
+        setPrice(Math.round(data.price));
+      }
+      if (typeof data.zip === 'string' && data.zip) {
+        setZdata(prev => ({ ...prev, zip: data.zip }));
+      }
     } finally { setBusy(false); }
   }
 
-  const rehabEstimate = useMemo(() => {
+  const fallbackRehab = useMemo(() => {
     if(!sqft) return undefined;
     return estimateRehab(detections, sqft, zdata.zip);
   }, [detections, sqft, zdata.zip]);
-  const rehab = rehabEstimate?.total;
+  const rehab = rehabData?.totals?.total ?? fallbackRehab?.total;
   const arv = computeARV(zdata.zestimate, mode);
   const metric = mode==='rental'
     ? (capRate(zdata.rent, price) ? `${capRate(zdata.rent, price)}%` : undefined)
     : (price && arv ? (arv - price).toLocaleString('en-US', {style:'currency', currency:'USD', maximumFractionDigits:0}) : undefined);
+  const rehabLineItems = useMemo(() => {
+    if (rehabData?.items?.length) return rehabData.items;
+    if (fallbackRehab?.lines?.length) {
+      return fallbackRehab.lines.map(({ item, cost }) => ({
+        category: item.replace(/_/g, ' ').replace(/\b\w/g, (char: string) => char.toUpperCase()),
+        subtotal: cost,
+      }));
+    }
+    return [];
+  }, [rehabData, fallbackRehab]);
   const reportPayload = useMemo(() => {
     const detectionsList = (detections || []).map((d: any) => ({
       label: (d.label || d.class || 'Item').toString(),
       confidence: typeof d.confidence === 'number' ? d.confidence : typeof d.score === 'number' ? d.score : undefined,
       note: d.note || d.description || '',
-    }));
-
-    const lineItems = rehabEstimate?.lines?.map?.(({ item, cost }) => ({
-      category: item.replace(/_/g, ' ').replace(/\b\w/g, (char: string) => char.toUpperCase()),
-      subtotal: cost,
     }));
 
     const safeSummary = summary && summary !== '—' ? summary : undefined;
@@ -122,7 +154,8 @@ export default function Form() {
       rehab,
       arv,
       metric,
-      lineItems,
+      lineItems: rehabLineItems,
+      localFactor,
       disclaimer:
         'Figures herein are planning-level estimates. Contractor bids, permits, and onsite inspections may adjust the final scope.',
       signatures: {
@@ -131,7 +164,7 @@ export default function Form() {
         date: new Date().toLocaleDateString(),
       },
     };
-  }, [detections, rehabEstimate, rehab, arv, metric, address, mode, sqft, price, zdata.zestimate, zdata.rent, zdata.zip, summary]);
+  }, [detections, rehab, arv, metric, address, mode, sqft, price, zdata.zestimate, zdata.rent, zdata.zip, summary, rehabLineItems, localFactor]);
 
   return (
     <div className="space-y-6">
@@ -196,6 +229,9 @@ export default function Form() {
 
       <div className="card p-5">
         <div className="hdr mb-3">Download Report</div>
+        {typeof localFactor === 'number' && Number.isFinite(localFactor) ? (
+          <p className="muted text-sm mb-3">Local cost factor applied: {localFactor.toFixed(2)}</p>
+        ) : null}
         <DownloadReportButton report={reportPayload} />
       </div>
     </div>

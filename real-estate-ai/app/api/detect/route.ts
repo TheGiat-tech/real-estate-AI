@@ -1,41 +1,96 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import { computePricing } from "@/lib/pricing";
+import type { DetectOutput, NormalizedDetection, Box, Mode } from "@/lib/types";
 
-export const dynamic = 'force-dynamic';
+export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-  if (!process.env.ROBOFLOW_API_KEY) {
-    return NextResponse.json({ error: 'ROBOFLOW_API_KEY is not configured' }, { status: 500 });
+function env(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env ${name}`);
+  return v;
+}
+
+function rfUrl(params: Record<string, string | number | undefined>) {
+  const base = env("ROBOFLOW_ENDPOINT");
+  const key = env("ROBOFLOW_API_KEY");
+  const u = new URL(base);
+  u.searchParams.set("api_key", key);
+  u.searchParams.set("format", "json");
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
   }
+  return u.toString();
+}
 
-  const { searchParams } = new URL(req.url);
-  const address = searchParams.get('address') ?? '';
-  const mode = searchParams.get('mode') ?? 'rental';
-  const sqft = searchParams.get('sqft') ?? '';
-  const purchase_price = searchParams.get('purchase_price') ?? '';
-
-  const form = await req.formData();
-  const file = form.get('image') as File | null;
-  if (!file) return NextResponse.json({ error: 'image missing' }, { status: 400 });
-
-  const u = new URL('https://detect.roboflow.com/property-rehab-arv-estimator');
-  u.searchParams.set('api_key', process.env.ROBOFLOW_API_KEY);
-  if (address) u.searchParams.set('address', address);
-  if (mode) u.searchParams.set('mode', mode);
-  if (sqft) u.searchParams.set('sqft', String(sqft));
-  if (purchase_price) u.searchParams.set('purchase_price', String(purchase_price));
-
-  const rfForm = new FormData();
-  rfForm.append('image', file);
-
+export async function POST(req: Request) {
   try {
-    const r = await fetch(u.toString(), { method: 'POST', body: rfForm, cache: 'no-store' });
-    if (!r.ok) {
-      const text = await r.text();
-      return NextResponse.json({ error: 'roboflow_failed', status: r.status, detail: text }, { status: 502 });
+    const form = await req.formData();
+    const image = form.get("image") as File | null;
+    if (!image) return NextResponse.json({ error: "image is required" }, { status: 400 });
+
+    const address = (form.get("address") ?? "") as string;
+    const mode = ((form.get("mode") ?? "rental") as Mode);
+    const sqft = Number(form.get("sqft") ?? 0) || undefined;
+    const purchase = Number(form.get("purchase_price") ?? 0) || undefined;
+    const confidence = Math.max(0, Math.min(1, Number(form.get("confidence") ?? 0.35)));
+
+    const url = rfUrl({ address, mode, sqft, purchase_price: purchase, confidence });
+    const fd = new FormData();
+    fd.append("file", image, (image as any).name || "upload.jpg");
+
+    const res = await fetch(url, { method: "POST", body: fd });
+    if (!res.ok) {
+      return NextResponse.json({ error: `Roboflow ${res.status}`, details: await res.text() }, { status: 502 });
     }
-    const j = await r.json().catch(() => ({}));
-    return NextResponse.json(j);
-  } catch (error) {
-    return NextResponse.json({ error: 'roboflow_request_failed', detail: (error as Error).message }, { status: 502 });
+    const rf = await res.json();
+
+    const preds = (rf?.predictions ?? rf?.detections ?? []) as any[];
+    const dets: NormalizedDetection[] = preds
+      .map((p) => {
+        const c = p.confidence ?? p.score ?? 0;
+        const b: Box | undefined = p.box
+          ? { x: p.box.x, y: p.box.y, width: p.box.width, height: p.box.height }
+          : (p.x != null && p.width != null
+              ? { x: p.x, y: p.y, width: p.width, height: p.height }
+              : undefined);
+        return { label: p.class ?? p.label ?? "issue", confidence: c, box: b };
+      })
+      .filter((d) => d.confidence >= confidence);
+
+    const hasMold = dets.some((d) => /mold/i.test(d.label));
+    const hasRoof = dets.some((d) => /roof/i.test(d.label));
+    const hasCrack = dets.some((d) => /crack/i.test(d.label));
+
+    const pricing = computePricing({
+      sqft,
+      mode,
+      address,
+      hasMold,
+      hasRoof,
+      hasCrack,
+    });
+
+    const out: DetectOutput = {
+      detections: dets,
+      summary: rf?.summary ?? "",
+      rehab_cost: rf?.rehab_cost ?? pricing.total,
+      arv: rf?.arv ?? null,
+      rent_estimate: rf?.rent_estimate ?? null,
+      cap_rate: rf?.cap_rate ?? null,
+      raw: rf,
+      pricing,
+      meta: {
+        address: address || undefined,
+        mode,
+        sqft,
+        purchase_price: purchase,
+        used_confidence: confidence,
+        model_endpoint: process.env.ROBOFLOW_ENDPOINT!,
+      },
+    };
+
+    return NextResponse.json(out);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || String(e) }, { status: 500 });
   }
 }

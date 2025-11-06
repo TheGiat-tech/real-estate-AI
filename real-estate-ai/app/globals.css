@@ -1,17 +1,39 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+:root {
+  color-scheme: dark;
+}
 
-:root { color-scheme: dark; }
-html, body { height: 100%; }
-body { @apply bg-bg text-ink; background: linear-gradient(180deg, #0b1020, #0e1730); }
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top, #111a3a, #070b1d 60%);
+  color: #e6edf3;
+}
 
-.container { @apply max-w-5xl mx-auto px-4; }
-.card { @apply bg-card/90 border border-white/10 rounded-2xl shadow-xl backdrop-blur; }
-.hdr  { @apply text-2xl font-bold; }
-.muted{ @apply text-mute; }
+body {
+  display: flex;
+  justify-content: center;
+}
 
-.btn  { @apply inline-flex items-center justify-center rounded-xl bg-prim font-semibold text-white px-4 py-2 hover:opacity-90 transition; }
-.input{ @apply w-full bg-[#0f1833] border border-white/10 rounded-xl px-3 py-2 outline-none; }
-.sel  { @apply input; }
-.kpi  { @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3; }
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  font-weight: 600;
+  transition: opacity 0.2s ease;
+}
+
+button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+input[type="file"] {
+  color: inherit;
+}
+
+pre {
+  font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}

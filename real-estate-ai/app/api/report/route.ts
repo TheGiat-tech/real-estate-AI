@@ -1,188 +1,106 @@
-import PDFDocument from "pdfkit";
-import { NextRequest } from "next/server";
+// Build a compact contractor-style PDF from DetectOutput using pdf-lib (no heavy React-PDF).
+import { NextResponse } from "next/server";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import type { PdfRequest, LineItem } from "@/lib/types";
 
-export const runtime = "nodejs"; // IMPORTANT: not Edge
+export const runtime = "nodejs";
 
-const fmt = (n: number | null | undefined) =>
-  n == null ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+function money(n?: number | null) {
+  return n == null || Number.isNaN(n) ? "—" : `$${Math.round(n).toLocaleString()}`;
+}
 
-type LineItem = { category: string; notes?: string; qty?: number; unit?: string; unitCost?: number; subtotal?: number };
+export async function POST(req: Request) {
+  try {
+    const body = (await req.json()) as PdfRequest;
+    const { header, client, data } = body;
 
-type Payload = {
-  company?: { name?: string; email?: string; phone?: string; address?: string; logoUrl?: string };
-  client?: { name?: string; email?: string; phone?: string };
-  address: string;
-  mode: "rental" | "flip";
-  sqft?: number;
-  price?: number;
-  zestimate?: number;
-  rent?: number;
-  zip?: string;
-  detections?: Array<{ label: string; confidence?: number; box?: any; note?: string }>;
-  summary?: string;
-  rehab?: number;
-  arv?: number;
-  metric?: string; // cap-rate% or profit$
-  lineItems?: LineItem[];
-  disclaimer?: string;
-  signatures?: { contractorName?: string; clientName?: string; date?: string };
-};
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([612, 792]); // Letter
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-export async function POST(req: NextRequest) {
-  const body = (await req.json()) as Payload;
+    let y = 750;
+    const draw = (text: string, x: number, fs = 11, b = false) => {
+      const f = b ? bold : font;
+      page.drawText(text, { x, y, size: fs, font: f, color: rgb(0, 0, 0) });
+      y -= fs + 4;
+    };
 
-  const doc = new PDFDocument({ size: "A4", margin: 48 });
-  const chunks: Buffer[] = [];
-  doc.on("data", (c) => chunks.push(c));
-  const done = new Promise<Buffer>((res) => doc.on("end", () => res(Buffer.concat(chunks))));
+    // Header
+    draw(header.companyName ?? "Real Estate AI Contractors", 36, 18, true);
+    if (header.companyLine1) draw(header.companyLine1, 36, 10);
+    const contact = [header.email, header.phone].filter(Boolean).join(" • ");
+    if (contact) draw(contact, 36, 10);
 
-  // Header
-  if (body.company?.logoUrl) {
-    try { doc.image(body.company.logoUrl, 48, 40, { width: 90 }); } catch {}
-  }
-  doc
-    .fontSize(18).text(body.company?.name ?? "Property Rehab & ARV Estimator", 150, 40, { align: "left" })
-    .moveDown(0.3)
-    .fontSize(10)
-    .fillColor("#444")
-    .text(body.company?.address ?? "", 150)
-    .text([body.company?.email, body.company?.phone].filter(Boolean).join(" · "), 150)
-    .moveTo(48, 100).lineTo(547, 100).strokeColor("#e5e7eb").stroke().fillColor("#000");
+    y -= 8;
+    page.drawLine({ start: { x: 36, y }, end: { x: 576, y }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+    y -= 12;
 
-  // Title + meta
-  doc.fontSize(16).text("Appraisal & Rehab Estimate", 48, 115);
-  doc.fontSize(10).fillColor("#666").text(`Generated: ${new Date().toLocaleString()}`);
+    draw("Appraisal & Rehab Estimate", 36, 13, true);
+    draw(`Generated: ${new Date().toLocaleString()}`, 36, 9);
 
-  // Property + client
-  const leftX = 48, rightX = 320, y0 = 150;
-  doc.fillColor("#000").fontSize(12).text("Property", leftX, y0);
-  doc.fontSize(10).fillColor("#333")
-    .text(`Address: ${body.address}`, leftX, y0 + 16)
-    .text(`Mode: ${body.mode}`, leftX, y0 + 30)
-    .text(`Square Feet: ${body.sqft ?? "—"}`, leftX, y0 + 44)
-    .text(`ZIP: ${body.zip ?? "—"}`, leftX, y0 + 58);
+    // Property/Client boxes
+    const left = y;
+    draw("Property", 36, 12, true);
+    draw(`Address: ${data.meta.address ?? "—"}`, 36);
+    draw(`Mode: ${data.meta.mode}`, 36);
+    draw(`Square Feet: ${data.meta.sqft ?? "—"}`, 36);
 
-  doc.fillColor("#000").fontSize(12).text("Client", rightX, y0);
-  doc.fontSize(10).fillColor("#333")
-    .text(`Name: ${body.client?.name ?? "—"}`, rightX, y0 + 16)
-    .text(`Email: ${body.client?.email ?? "—"}`, rightX, y0 + 30)
-    .text(`Phone: ${body.client?.phone ?? "—"}`, rightX, y0 + 44);
+    y = left;
+    draw("Client", 320, 12, true);
+    draw(`Name: ${client?.name ?? "—"}`, 320);
+    draw(`Email: ${client?.email ?? "—"}`, 320);
+    draw(`Phone: ${client?.phone ?? "—"}`, 320);
 
-  // KPI boxes
-  const kpiY = y0 + 90;
-  const box = (label: string, value: string, x: number) => {
-    doc.roundedRect(x, kpiY, 155, 54, 8).fillOpacity(0.04).fill("#3b82f6").fillOpacity(1).strokeColor("#e5e7eb").stroke();
-    doc.fillColor("#666").fontSize(9).text(label, x + 10, kpiY + 8);
-    doc.fillColor("#000").fontSize(14).text(value, x + 10, kpiY + 24);
-  };
-  box("Rehab Estimate", fmt(body.rehab ?? 0), 48);
-  box("ARV (Projected)", fmt(body.arv ?? 0), 211);
-  box(body.mode === "rental" ? "Cap Rate" : "Profit (flip)", body.metric ?? "—", 374);
+    y -= 6;
+    page.drawLine({ start: { x: 36, y }, end: { x: 576, y }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+    y -= 10;
 
-  // Summary
-  doc.moveDown().fillColor("#000").fontSize(12).text("Summary", 48, kpiY + 70);
-  doc.fontSize(10).fillColor("#333").text(
-    body.summary ||
-      "This report summarizes visible damages and a scope of work appropriate for rental-quality finish (unless specified otherwise). Pricing reflects current averages and may vary by market, material grade, and labor availability."
-  );
+    // KPIs
+    draw(`Rehab Estimate: ${money(data.rehab_cost ?? data.pricing?.total)}`, 36, 12, true);
+    draw(`ARV (Projected): ${money(data.arv)}`, 236, 12, true);
+    draw(`Cap Rate: ${data.cap_rate != null ? `${data.cap_rate}%` : "—"}`, 436, 12, true);
 
-  // Detections table
-  doc.moveDown().fillColor("#000").fontSize(12).text("AI Detections");
-  const dets = body.detections ?? [];
-  if (!dets.length) {
-    doc.fontSize(10).fillColor("#777").text("No visible damages were detected in the provided images.");
-  } else {
-    const startY = doc.y + 6;
-    const col = [48, 260, 430];
-    doc.strokeColor("#e5e7eb").moveTo(48, startY).lineTo(547, startY).stroke();
-    doc.fontSize(9).fillColor("#555")
-      .text("Type", col[0], startY + 6)
-      .text("Confidence", col[1], startY + 6)
-      .text("Notes/Location", col[2], startY + 6);
-    doc.moveTo(48, startY + 22).lineTo(547, startY + 22).stroke();
+    y -= 6;
+    draw("Summary", 36, 12, true);
+    draw(data.summary || "This report summarizes detected issues and a scope of work suitable for the selected finish grade.", 36);
 
-    let y = startY + 30;
-    dets.forEach((d) => {
-      doc.fillColor("#000").fontSize(10)
-        .text(d.label ?? "—", col[0], y)
-        .text(d.confidence != null ? (d.confidence * 100).toFixed(0) + "%" : "—", col[1], y)
-        .text(d.note ?? "", col[2], y, { width: 547 - col[2] });
-      y += 16;
-      if (y > 740) { doc.addPage(); y = 60; }
-    });
-  }
+    // Detections
+    y -= 2;
+    draw("AI Detections", 36, 12, true);
+    if (!data.detections?.length) draw("No visible damages were detected in the provided images.", 36);
+    else data.detections.slice(0, 6).forEach((d) => draw(`• ${d.label} (${(d.confidence * 100).toFixed(0)}%)`, 36));
 
-  // Line items (scope)
-  doc.moveDown().fillColor("#000").fontSize(12).text("Scope of Work & Line Items");
-  const rows: LineItem[] = (body.lineItems?.length ? body.lineItems : [
-    { category: "Interior Paint", qty: body.sqft ?? 0, unit: "sqft", unitCost: 1.8 },
-    { category: "Flooring (LVP/Carpet mix)", qty: body.sqft ? Math.round((body.sqft * 0.7)) : undefined, unit: "sqft", unitCost: 2.6 },
-    { category: "Bathroom Refresh", qty: 1, unit: "each", unitCost: 1800 },
-    { category: "Kitchen Touch-up", qty: 1, unit: "each", unitCost: 1500 },
-  ]).map(r => ({ ...r, subtotal: r.subtotal ?? ((r.qty ?? 1) * (r.unitCost ?? 0)) }));
-
-  // table header
-  const headerY = doc.y + 6;
-  doc.strokeColor("#e5e7eb").moveTo(48, headerY).lineTo(547, headerY).stroke();
-  doc.fontSize(9).fillColor("#555")
-     .text("Category", 48, headerY + 6)
-     .text("Qty", 280, headerY + 6)
-     .text("Unit", 320, headerY + 6)
-     .text("Unit Cost", 360, headerY + 6)
-     .text("Subtotal", 450, headerY + 6);
-  doc.moveTo(48, headerY + 22).lineTo(547, headerY + 22).stroke();
-
-  let y = headerY + 30;
-  let total = 0;
-  rows.forEach(r => {
-    total += r.subtotal ?? 0;
-    doc.fillColor("#000").fontSize(10)
-      .text(r.category, 48, y, { width: 220 })
-      .text(r.qty != null ? String(r.qty) : "—", 280, y)
-      .text(r.unit ?? "—", 320, y)
-      .text(r.unitCost != null ? fmt(r.unitCost) : "—", 360, y)
-      .text(fmt(r.subtotal ?? 0), 450, y);
-    y += 16;
-    if (y > 730) { doc.addPage(); y = 60; }
-  });
-
-  const contingency = Math.round(total * 0.15);
-  const grand = total + contingency;
-  doc.moveDown().fontSize(10).fillColor("#333")
-     .text(`Subtotal: ${fmt(total)}`)
-     .text(`Contingency (15%): ${fmt(contingency)}`)
-     .fontSize(12).fillColor("#000").text(`Estimated Rehab Total: ${fmt(grand)}`);
-
-  // Financials
-  doc.moveDown().fontSize(12).fillColor("#000").text("Financial Summary");
-  const zv = body.zestimate ?? body.arv ?? 0;
-  const arv = body.arv ?? Math.round(zv);
-  doc.fontSize(10).fillColor("#333")
-     .text(`Purchase Price: ${fmt(body.price ?? 0)}`)
-     .text(`ARV (Projected): ${fmt(arv)}`)
-     .text(body.mode === "rental" ? `Cap Rate: ${body.metric ?? "—"}` : `Profit (Flip): ${body.metric ?? "—"}`);
-
-  // Disclaimer & signatures
-  doc.moveDown().fontSize(9).fillColor("#666").text(
-    body.disclaimer ??
-      "This estimate is provided for planning purposes only. Final pricing subject to site verification, permit requirements, material selections, and contractor availability."
-  , { width: 500 });
-
-  doc.moveDown(1.2).fillColor("#000").fontSize(10)
-     .text("Contractor Signature: ____________________", 48)
-     .text("Client Signature: ________________________", 300)
-     .moveDown(0.3)
-     .fontSize(9).fillColor("#666")
-     .text(`Date: ${body.signatures?.date ?? new Date().toLocaleDateString()}`, 48);
-
-  doc.end();
-  const buf = await done;
-
-  return new Response(new Uint8Array(buf), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="appraisal_${Date.now()}.pdf"`
+    // Scope/Line Items
+    y -= 2;
+    draw("Scope of Work & Line Items", 36, 12, true);
+    const items: LineItem[] = data.pricing?.lineItems ?? [];
+    if (!items.length) draw("No scope items available.", 36);
+    else {
+      draw("Category                          Qty      Unit      Unit Cost      Subtotal", 36, 10, true);
+      items.forEach((li) => {
+        const row = `${li.label.padEnd(30)}  ${String(li.qty).padStart(6)}   ${li.unit.padEnd(8)}   ${money(li.unitCost).padEnd(10)}   ${money(li.subtotal)}`;
+        draw(row, 36, 10);
+      });
+      draw(`Subtotal: ${money(data.pricing?.subtotal)}`, 400, 11, true);
+      draw(`Contingency (${Math.round((data.pricing?.contingencyPct ?? 0) * 100)}%): ${money(data.pricing?.contingency)}`, 400, 11, true);
+      draw(`Estimated Rehab Total: ${money(data.pricing?.total)}`, 400, 12, true);
     }
-  });
+
+    y -= 10;
+    draw("Contractor Signature: ____________________", 36, 11);
+    draw("Client Signature: ____________________", 350, 11);
+    draw(`Date: ${new Date().toLocaleDateString()}`, 36, 10);
+
+    const bytes = await pdf.save();
+    return new NextResponse(Buffer.from(bytes), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="rehab-estimate.pdf"`,
+      },
+    });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || String(e) }, { status: 500 });
+  }
 }
