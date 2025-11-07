@@ -38,4 +38,4 @@ async function main(){
   console.log('Wrote', dest, 'records:', Object.keys(out).length);
 }
 
-main().catch(err=>{ console.error(err); process.exit(1); });
+main().catch(err => { console.error(err); process.exit(1); });

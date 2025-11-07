@@ -2,13 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import Papa from 'papaparse';
 
-function usage(){
+function usage() {
   console.log('Usage: npx ts-node scripts/build_zip_to_msa.ts path/to/zip_to_msa.csv');
   process.exit(1);
 }
 
 const inputPath = process.argv[2];
-if(!inputPath) usage();
+if (!inputPath) usage();
 
 const csvText = fs.readFileSync(inputPath, 'utf8');
 const parsed = Papa.parse(csvText, { header: true });
