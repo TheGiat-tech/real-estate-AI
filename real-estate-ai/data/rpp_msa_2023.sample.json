@@ -1,0 +1,7 @@
+{
+  "33100": { "msa": "Miami–Fort Lauderdale–West Palm Beach, FL", "state": "FL", "rpp": 107.8, "housing": 124.6, "goods": 102.2, "services": 106.3 },
+  "19100": { "msa": "Dallas–Fort Worth–Arlington, TX", "state": "TX", "rpp": 99.8, "housing": 104.5, "goods": 97.4, "services": 99.6 },
+  "38060": { "msa": "Phoenix–Mesa–Chandler, AZ", "state": "AZ", "rpp": 101.3, "housing": 108.0, "goods": 99.7, "services": 100.9 },
+  "31080": { "msa": "Los Angeles–Long Beach–Anaheim, CA", "state": "CA", "rpp": 117.5, "housing": 150.2, "goods": 109.8, "services": 114.0 },
+  "35620": { "msa": "New York–Newark–Jersey City, NY–NJ–PA", "state": "NY", "rpp": 122.6, "housing": 170.5, "goods": 110.4, "services": 118.3 }
+}
