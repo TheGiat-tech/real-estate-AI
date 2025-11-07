@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const file = form.get('image') as File | null;
   if (!file) return NextResponse.json({ error: 'image missing' }, { status: 400 });
 
-  const u = new URL('https://detect.roboflow.com/property-rehab-arv-estimator');
+  const u = new URL('https://detect.roboflow.com/property-rehab-arv-estimator/1');
   u.searchParams.set('api_key', process.env.ROBOFLOW_API_KEY);
   if (address) u.searchParams.set('address', address);
   if (mode) u.searchParams.set('mode', mode);
@@ -31,11 +31,28 @@ export async function POST(req: NextRequest) {
     const r = await fetch(u.toString(), { method: 'POST', body: rfForm, cache: 'no-store' });
     if (!r.ok) {
       const text = await r.text();
-      return NextResponse.json({ error: 'roboflow_failed', status: r.status, detail: text }, { status: 502 });
+      console.error('Roboflow API error:', { status: r.status, body: text });
+      return NextResponse.json({ 
+        error: 'Detection failed', 
+        message: `Roboflow API returned status ${r.status}. Please check your API key and model configuration.`,
+        status: r.status, 
+        detail: text 
+      }, { status: 502 });
     }
     const j = await r.json().catch(() => ({}));
+    
+    // Validate that we got a proper response with detections or predictions
+    if (!j.predictions && !j.detections) {
+      console.warn('Roboflow response missing predictions/detections:', j);
+    }
+    
     return NextResponse.json(j);
   } catch (error) {
-    return NextResponse.json({ error: 'roboflow_request_failed', detail: (error as Error).message }, { status: 502 });
+    console.error('Roboflow request error:', error);
+    return NextResponse.json({ 
+      error: 'Detection request failed', 
+      message: `Failed to connect to Roboflow API: ${(error as Error).message}`,
+      detail: (error as Error).message 
+    }, { status: 502 });
   }
 }
