@@ -73,7 +73,7 @@ export default function Form() {
       
       // Check for API errors and display them to the user
       if (data.error) {
-        const errorMsg = data.message || data.error || 'Detection failed';
+        const errorMsg = data.message || 'Detection failed';
         alert(`Error: ${errorMsg}`);
         console.error('Detection API error:', data);
         return;
@@ -83,7 +83,7 @@ export default function Form() {
       setDetections(dets);
       setSummary(data.summary ?? '—');
     } catch (error) {
-      alert(`Request failed: ${(error as Error).message}`);
+      alert(`Detection request failed: ${(error as Error).message}`);
       console.error('Detection request error:', error);
     } finally { setBusy(false); }
   }
