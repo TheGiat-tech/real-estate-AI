@@ -70,10 +70,21 @@ export default function Form() {
       if(price) u.searchParams.set('purchase_price', String(price));
       const res = await fetch(u.toString(), { method:'POST', body: fd });
       const data = await res.json();
+      
+      // Check for API errors and display them to the user
+      if (data.error) {
+        const errorMsg = data.message || data.error || 'Detection failed';
+        alert(`Error: ${errorMsg}`);
+        console.error('Detection API error:', data);
+        return;
+      }
 
       const dets = (data.detections ?? data.predictions ?? []);
       setDetections(dets);
       setSummary(data.summary ?? '—');
+    } catch (error) {
+      alert(`Request failed: ${(error as Error).message}`);
+      console.error('Detection request error:', error);
     } finally { setBusy(false); }
   }
 
