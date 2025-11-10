@@ -50,7 +50,31 @@ export default function Form() {
   async function autofill(){
     if(!address) return alert('Enter address first');
     const res = await fetch(`/api/zillow?address=${encodeURIComponent(address)}`);
-    if(!res.ok){ alert('Zillow lookup failed'); return; }
+    if(!res.ok){ 
+      // Parse detailed error response
+      let errorMessage = 'Zillow lookup failed';
+      try {
+        const errorData = await res.json();
+        if (errorData.message) {
+          errorMessage = errorData.message;
+          if (errorData.status) {
+            errorMessage += ` (HTTP ${errorData.status})`;
+          }
+          if (errorData.detail) {
+            // Truncate detail to ~300 chars for display
+            const truncatedDetail = errorData.detail.substring(0, 300);
+            errorMessage += `\n\nDetails: ${truncatedDetail}${errorData.detail.length > 300 ? '...' : ''}`;
+          }
+          if (errorData.host) {
+            errorMessage += `\n\nHost: ${errorData.host}`;
+          }
+        }
+      } catch {
+        // If parsing fails, use default message
+      }
+      alert(errorMessage);
+      return; 
+    }
     const j = await res.json();
     setZdata(j);
     if(!sqft && j.sqft) setSqft(j.sqft);
