@@ -38,3 +38,56 @@ export function capRate(rent?: number, price?: number) {
   const noi = rent * 12 * 0.6; // ~40% opex
   return Number(((noi / price) * 100).toFixed(1));
 }
+
+export type RehabInputs = {
+  sqft: number;
+  finish: 'rental' | 'flip';
+  baseCosts: {
+    paint_per_sf: number;
+    flooring_per_sf: number;
+    drywall_per_sf: number;
+    roof_per_sf: number;
+    hvac_per_sf: number;
+    kitchen_per_sf?: number;
+    bath_per_sf?: number;
+  };
+};
+
+// NEW: apply a local factor to a numeric cost safely
+export function applyLocalFactor(value: number, factor: number | undefined): number {
+  const f = Number.isFinite(factor as number) && (factor as number)! > 0 ? (factor as number)! : 1.0;
+  return Math.round(value * f);
+}
+
+/**
+ * computeRehabCost now accepts optional localFactor and returns line items + totals
+ */
+export function computeRehabCost(inp: RehabInputs, localFactor = 1.0) {
+  const { sqft, baseCosts } = inp;
+
+  const items = [
+    { category: 'Interior Paint', subtotal: Math.round(baseCosts.paint_per_sf * sqft) },
+    { category: 'Flooring',      subtotal: Math.round(baseCosts.flooring_per_sf * sqft) },
+    { category: 'Drywall',       subtotal: Math.round(baseCosts.drywall_per_sf * sqft) },
+    { category: 'Roof',          subtotal: Math.round(baseCosts.roof_per_sf * sqft) },
+    { category: 'HVAC',          subtotal: Math.round(baseCosts.hvac_per_sf * sqft) },
+  ];
+
+  if (baseCosts.kitchen_per_sf) {
+    items.push({ category: 'Kitchen', subtotal: Math.round(baseCosts.kitchen_per_sf * sqft) });
+  }
+  if (baseCosts.bath_per_sf) {
+    items.push({ category: 'Bathroom', subtotal: Math.round(baseCosts.bath_per_sf * sqft) });
+  }
+
+  // apply local factor to each line
+  const factored = items.map(it => ({ ...it, subtotal: applyLocalFactor(it.subtotal, localFactor) }));
+  const subtotal = factored.reduce((s, it) => s + it.subtotal, 0);
+  const contingency = Math.round(subtotal * 0.15);
+  const total = subtotal + contingency;
+
+  return {
+    items: factored,
+    totals: { subtotal, contingencyPct: 0.15, contingency, total }
+  };
+}
